@@ -1,0 +1,33 @@
+# Build outputs
+SharkX-OS/build/*
+SharkX-OS/iso/boot/kernel.elf
+
+# Compiled / binary artifacts
+*.o
+*.d
+*.elf
+*.iso
+*.bin
+*.img
+*.map
+
+# QEMU / test logs
+*.log
+serial*.txt
+qemu*.log
+
+# Editor and OS metadata
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Python / tool caches
+__pycache__/
+*.pyc
+*.pyo
+
+# Local CodeGraph database (keep .codegraph/.gitignore)
+.codegraph/codegraph.db

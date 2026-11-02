@@ -1,184 +1,89 @@
+#include <kernel/types.h>
+#include <kernel/io.h>
+#include <kernel/console.h>
+#include <kernel/panic.h>
+#include <kernel/kernel.h>
+#include <kernel/multiboot2.h>
+#include <kernel/gdt.h>
+#include <kernel/idt.h>
+#include <kernel/pic.h>
+#include <kernel/timer.h>
+#include <kernel/shell.h>
+#include <drivers/keyboard.h>
+#include <memory/pmm.h>
+#include <memory/heap.h>
+#include <process/thread.h>
+#include <security/security.h>
+#include <filesystem/vfs.h>
+#include <lib/printf.h>
 
-#include <stdint.h>
-
-#define COM1 0x3F8
-
-static inline void outb(uint16_t port, uint8_t value)
+extern "C" void kernel_main(uint32_t magic, uint64_t mbi_addr)
 {
-    asm volatile (
-        "outb %0, %1"
-        :
-        : "a"(value), "Nd"(port)
-    );
-}
+    console_init();
+    kernel_print_banner();
 
-static inline uint8_t inb(uint16_t port)
-{
-    uint8_t value;
-
-    asm volatile (
-        "inb %1, %0"
-        : "=a"(value)
-        : "Nd"(port)
-    );
-
-    return value;
-}
-
-void serial_init()
-{
-    outb(COM1 + 1, 0x00);
-    outb(COM1 + 3, 0x80);
-    outb(COM1 + 0, 0x03);
-    outb(COM1 + 1, 0x00);
-    outb(COM1 + 3, 0x03);
-    outb(COM1 + 2, 0xC7);
-    outb(COM1 + 4, 0x0B);
-}
-
-void serial_write(char c)
-{
-    while (!(inb(COM1 + 5) & 0x20));
-
-    outb(COM1, c);
-}
-
-void print(const char* text)
-{
-    while (*text)
+    if (magic != MULTIBOOT2_BOOTLOADER_MAGIC)
     {
-        serial_write(*text++);
-    }
-}
-
-void println(const char* text)
-{
-    print(text);
-    print("\r\n");
-}
-
-void read_line(char* buffer, int max)
-{
-    int i = 0;
-
-    while (true)
-    {
-        char c = 0;
-
-        while (!(inb(COM1 + 5) & 0x01));
-
-        c = inb(COM1);
-
-        if (c == '\r' || c == '\n')
-        {
-            print("\r\n");
-            break;
-        }
-
-        if (c == '\b' || c == 127)
-        {
-            if (i > 0)
-            {
-                i--;
-                print("\b \b");
-            }
-            continue;
-        }
-
-        if (i < max - 1 && c >= 32 && c <= 126)
-        {
-            buffer[i++] = c;
-            serial_write(c);
-        }
+        panic("invalid Multiboot2 magic: 0x%x (expected 0x%x)",
+              (unsigned int)magic,
+              (unsigned int)MULTIBOOT2_BOOTLOADER_MAGIC);
     }
 
-    buffer[i] = '\0';
-}
-
-bool equals(const char* a, const char* b)
-{
-    while (*a && *b)
+    if (mbi_addr == 0)
     {
-        if (*a != *b)
-            return false;
-
-        a++;
-        b++;
+        panic("Multiboot2 information pointer is null");
     }
 
-    return *a == *b;
-}
+    kprintf("[boot] Multiboot2 magic valid, info at 0x%llx\n", (unsigned long long)mbi_addr);
 
-void shell()
-{
-    char command[128];
-
-    while (true)
+    const char* cmdline = multiboot_cmdline(mbi_addr);
+    if (cmdline != nullptr && cmdline[0] != '\0')
     {
-        print("SharkX> ");
-
-        read_line(command, sizeof(command));
-
-        if (equals(command, "help"))
-        {
-            println("Available commands:");
-            println("help    - Show commands");
-            println("about   - OS information");
-            println("version - Kernel version");
-            println("clear   - Clear terminal");
-            println("halt    - Stop CPU");
-        }
-        else if (equals(command, "about"))
-        {
-            println("SharkX OS");
-            println("A custom x86_64 operating system.");
-            println("Written in C++ and Assembly.");
-        }
-        else if (equals(command, "version"))
-        {
-            println("SharkX OS v0.1.0");
-        }
-        else if (equals(command, "clear"))
-        {
-            print("\x1b[2J\x1b[H");
-        }
-        else if (equals(command, "halt"))
-        {
-            println("Shutting down CPU...");
-
-            asm volatile (
-                "cli\n"
-                "hlt\n"
-            );
-        }
-        else if (command[0] == '\0')
-        {
-            continue;
-        }
-        else
-        {
-            println("Unknown command. Type help.");
-        }
+        kprintf("[boot] command line: %s\n", cmdline);
     }
-}
 
-extern "C" void kernel_main()
-{
-    serial_init();
+    gdt_init();
+    kprintf("[boot] GDT loaded\n");
 
-    println("");
-    println("  ____  _               _    __  __");
-    println(" / ___|| |__   __ _ _ __| | _|  \\/  |");
-    println(" \\___ \\| '_ \\ / _` | '__| |/ / |\\/| |");
-    println("  ___) | | | | (_| | |  |   <| |  | |");
-    println(" |____/|_| |_|\\__,_|_|  |_|\\_\\_|  |_|");
+    idt_init();
+    kprintf("[boot] IDT loaded (exceptions + IRQs 0-15)\n");
 
-    println("");
-    println("Welcome to SharkX OS!");
-    println("Kernel architecture: x86_64");
-    println("Kernel language: C++");
-    println("Boot protocol: Multiboot2");
-    println("");
+    pic_remap();
+    pic_mask_all();
+    pic_unmask(0);
+    pic_unmask(1);
+    pic_unmask(4);
+    timer_init(TIMER_HZ);
+    keyboard_init();
+    kprintf("[boot] PIC remapped, PIT at %u Hz, PS/2 keyboard + serial IRQ ready\n", (unsigned int)TIMER_HZ);
 
-    shell();
+    pmm_init(mbi_addr);
+    const PmmStats& pmm = pmm_stats();
+    kprintf("[boot] PMM: %llu frames managed, %llu free (%llu KiB)\n",
+            (unsigned long long)pmm.total_frames,
+            (unsigned long long)pmm.free_frames,
+            (unsigned long long)(pmm.free_frames * PAGE_SIZE / 1024));
+
+    heap_init();
+    HeapStats heap = heap_stats();
+    kprintf("[boot] kernel heap: %llu KiB\n", (unsigned long long)(heap.total_bytes / 1024));
+
+    security_init();
+    kprintf("[boot] security: software DAC active, current user %s\n", security_current_name());
+
+    vfs_init();
+    kprintf("[boot] VFS RAMDisk: %d files\n", vfs_count());
+
+    kernel_run_constructors();
+
+    scheduler_init();
+    kernel_start_demo_threads();
+    kprintf("[boot] scheduler: round robin, %d live kernel threads (incl. main and idle)\n", thread_live_count());
+
+    kprintf("\n[ready] Type 'help' for the SharkX Shell command list.\n\n");
+
+    cpu_sti();
+    shell_run();
+
+    panic("shell returned unexpectedly");
 }

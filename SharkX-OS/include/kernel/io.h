@@ -1,0 +1,92 @@
+#pragma once
+
+#include <stdint.h>
+
+static inline void outb(uint16_t port, uint8_t value)
+{
+    asm volatile("outb %0, %1" : : "a"(value), "Nd"(port) : "memory");
+}
+
+static inline void outw(uint16_t port, uint16_t value)
+{
+    asm volatile("outw %0, %1" : : "a"(value), "Nd"(port) : "memory");
+}
+
+static inline void outl(uint16_t port, uint32_t value)
+{
+    asm volatile("outl %0, %1" : : "a"(value), "Nd"(port) : "memory");
+}
+
+static inline uint8_t inb(uint16_t port)
+{
+    uint8_t value;
+    asm volatile("inb %1, %0" : "=a"(value) : "Nd"(port) : "memory");
+    return value;
+}
+
+static inline uint16_t inw(uint16_t port)
+{
+    uint16_t value;
+    asm volatile("inw %1, %0" : "=a"(value) : "Nd"(port) : "memory");
+    return value;
+}
+
+static inline uint32_t inl(uint16_t port)
+{
+    uint32_t value;
+    asm volatile("inl %1, %0" : "=a"(value) : "Nd"(port) : "memory");
+    return value;
+}
+
+static inline void io_wait(void)
+{
+    outb(0x80, 0);
+}
+
+static inline void cpu_cli(void)
+{
+    asm volatile("cli" : : : "memory");
+}
+
+static inline void cpu_sti(void)
+{
+    asm volatile("sti" : : : "memory");
+}
+
+static inline void cpu_hlt(void)
+{
+    asm volatile("hlt" : : : "memory");
+}
+
+static inline void cpu_pause(void)
+{
+    asm volatile("pause" : : : "memory");
+}
+
+static inline uint64_t cpu_rdtsc(void)
+{
+    uint32_t low;
+    uint32_t high;
+    asm volatile("rdtsc" : "=a"(low), "=d"(high) : : "memory");
+    return ((uint64_t)high << 32) | low;
+}
+
+static inline uint64_t irq_save(void)
+{
+    uint64_t flags;
+    asm volatile("pushfq; popq %0; cli" : "=r"(flags) : : "memory", "cc");
+    return flags;
+}
+
+static inline void irq_restore(uint64_t flags)
+{
+    asm volatile("pushq %0; popfq" : : "r"(flags) : "memory", "cc");
+}
+
+[[noreturn]] static inline void cpu_halt_forever(void)
+{
+    for (;;)
+    {
+        asm volatile("cli; hlt");
+    }
+}
